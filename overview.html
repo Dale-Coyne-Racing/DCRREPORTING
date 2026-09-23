@@ -38,6 +38,7 @@ h1{margin:0;font-size:clamp(24px,3vw,34px);letter-spacing:-.03em}
 button{font:inherit}
 .small-btn{border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);padding:7px 9px;font-size:11px;cursor:pointer}
 .small-btn:hover{border-color:#454c5a;color:var(--text)}
+.mode-toggle{display:flex;align-items:center;gap:7px;margin-top:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font-size:11px;font-weight:750;cursor:pointer;width:100%;justify-content:space-between}.mode-toggle:hover{border-color:#454c5a}.mode-toggle .mode-value{color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
 .event-list{display:grid;gap:5px;max-height:430px;overflow:auto;padding-right:3px}
 .event-option{display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);text-align:left;cursor:pointer}
 .event-option:hover{background:var(--panel2);border-color:var(--border)}
@@ -64,7 +65,7 @@ canvas{display:block;width:100%;height:500px}
 <header class="topbar">
   <div class="brand">
     <div><a href="index.html"><img src="logo.png" alt="DCR Logo"></a></div>
-    <div><div class="brand-title">DCR Reporting</div><div class="brand-sub">Race Operations and Performance</div></div>
+    <div><div class="brand-title">DCR Reporting</div><div class="brand-sub">Race Operations &amp; Performance</div></div>
   </div>
   <div class="status"><span id="statusDot" class="status-dot"></span><span id="statusText">Connecting</span></div>
 </header>
@@ -85,6 +86,19 @@ canvas{display:block;width:100%;height:500px}
       <select id="memberSelect" class="select">
         <option value="">Select a member</option>
       </select>
+    </div>
+
+    <div class="control-section">
+      <div class="control-heading">Y-Axis Maximum</div>
+      <input id="maxYInput" class="select" type="number" min="0.1" step="0.5" value="10" inputmode="decimal" aria-label="Maximum Y axis value">
+    </div>
+
+    <div class="control-section">
+      <div class="control-heading">X-Axis Mapping</div>
+      <button id="mappingToggle" class="mode-toggle" type="button" aria-pressed="false">
+        <span>Toggle mapping</span>
+        <span id="mappingMode" class="mode-value">Overlay</span>
+      </button>
     </div>
 
     <div class="control-section">
@@ -121,6 +135,7 @@ canvas{display:block;width:100%;height:500px}
 
 <script>
 const API_URL = "https://crisp-publicly-mosquito.ngrok-free.app";
+const DEFAULT_MAX_Y = 10;
 
 const EVENT_COLORS = [
     "#ff6b00","#62a8ff","#58c46b","#e7bd48","#b879ff",
@@ -132,6 +147,8 @@ let allRows = [];
 let events = [];
 let selectedEvents = new Set();
 let selectedMember = "";
+let mappingMode = "overlay";
+let maxYSetting = DEFAULT_MAX_Y;
 
 const $ = id => document.getElementById(id);
 
@@ -287,7 +304,6 @@ function drawChart() {
 
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr,0,0,dpr,0,0);
-
     ctx.clearRect(0,0,width,height);
 
     const left = 62;
@@ -312,16 +328,19 @@ function drawChart() {
             width / 2,
             height / 2
         );
+        $("chartSubtitle").textContent = !selectedMember ? "Select a member" : "Select events";
         return;
     }
 
     const series = [];
 
-    for (let eventIndex = 0; eventIndex < selected.length; eventIndex++) {
-        const event = selected[eventIndex];
+    for (const event of selected) {
         const rows = event.rows
             .filter(r => r.member === selectedMember)
-            .sort((a,b) => a.stopnum - b.stopnum);
+            .sort((a,b) => {
+                const stopCompare = a.stopnum - b.stopnum;
+                return stopCompare || a.stopdate.localeCompare(b.stopdate);
+            });
 
         if (!rows.length) continue;
 
@@ -337,24 +356,83 @@ function drawChart() {
         ctx.font = "13px Inter, system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(`No stops found for ${selectedMember} in the selected events.`, width/2, height/2);
+        $("chartSubtitle").textContent = `${selectedMember} · No stops`;
         return;
     }
 
-  
-    maxY = 10;
-
-
-    function x(index, total) {
-        if (total <= 1) return left + plotW / 2;
-        return left + (index / (total - 1)) * plotW;
-    }
+    // Fixed user-controlled Y-axis ceiling.
+    // Default is 10 seconds.
+    const maxY = maxYSetting;
 
     function y(value) {
         return top + plotH - (value / maxY) * plotH;
     }
 
-    // Grid and Y axis.
-    const yStep = maxY <= 8 ? 0.5 : 1;
+    // ---------------------------------------------
+    // X AXIS MAPPING
+    //
+    // Overlay:
+    //   x = stop number. Every event's stop #1 lines
+    //   up with every other event's stop #1, etc.
+    //
+    // Chronological:
+    //   x = actual event date + stop number. Dates are
+    //   compared as YYYYMMDD integers, then stopnum breaks
+    //   ties within the same day.
+    // ---------------------------------------------
+
+    const chronological = mappingMode === "chronological";
+
+    let xEntries;
+
+    if (chronological) {
+        const allStops = series.flatMap(s =>
+            s.rows.map(row => ({
+                date: row.stopdate,
+                stopnum: row.stopnum
+            }))
+        );
+
+        const unique = new Map();
+
+        for (const item of allStops) {
+            const key = `${item.date}|${item.stopnum}`;
+            if (!unique.has(key)) unique.set(key, item);
+        }
+
+        xEntries = [...unique.values()].sort((a,b) => {
+            const dateCompare = Number(a.date) - Number(b.date);
+            return dateCompare || a.stopnum - b.stopnum;
+        });
+    } else {
+        xEntries = [...new Set(
+            series.flatMap(s => s.rows.map(r => r.stopnum))
+        )].sort((a,b) => a-b);
+    }
+
+    const xKey = item => chronological
+        ? `${item.stopdate}|${item.stopnum}`
+        : String(item.stopnum);
+
+    const indexByX = new Map(
+        xEntries.map((item, index) => {
+            const key = chronological
+                ? `${item.date}|${item.stopnum}`
+                : String(item);
+            return [key, index];
+        })
+    );
+
+    function x(index) {
+        if (xEntries.length <= 1) return left + plotW / 2;
+        return left + (index / (xEntries.length - 1)) * plotW;
+    }
+
+    // ---------------------------------------------
+    // Y GRID
+    // ---------------------------------------------
+
+    const yStep = maxY <= 8 ? 0.5 : (maxY <= 20 ? 1 : 5);
 
     for (let value = 0; value <= maxY + .001; value += yStep) {
         const yy = y(value);
@@ -372,31 +450,59 @@ function drawChart() {
         ctx.fillText(value.toFixed(value % 1 ? 1 : 0), left-9, yy+3);
     }
 
-    // Build a shared x-axis from every stop number represented.
-    const stopNumbers = [...new Set(
-        series.flatMap(s => s.rows.map(r => r.stopnum))
-    )].sort((a,b) => a-b);
+    // ---------------------------------------------
+    // X GRID + LABELS
+    // ---------------------------------------------
 
-    const indexByStop = new Map(stopNumbers.map((n,i) => [n,i]));
+    if (chronological) {
+        // Draw every selected stop position, but avoid unreadable labels
+        // when a year contains a large number of stops.
+        const maxLabels = 18;
+        const labelEvery = Math.max(1, Math.ceil(xEntries.length / maxLabels));
 
-    // Vertical guides.
-    for (let i = 0; i < stopNumbers.length; i++) {
-        const xx = x(i, stopNumbers.length);
+        for (let i = 0; i < xEntries.length; i++) {
+            const xx = x(i);
 
-        ctx.strokeStyle = "#222832";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(xx,top);
-        ctx.lineTo(xx,height-bottom);
-        ctx.stroke();
+            ctx.strokeStyle = "#222832";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(xx,top);
+            ctx.lineTo(xx,height-bottom);
+            ctx.stroke();
 
-        ctx.fillStyle = "#7f8796";
-        ctx.font = "10px Inter, system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(`#${stopNumbers[i]}`,xx,height-bottom+20);
+            const entry = xEntries[i];
+            const showLabel = i % labelEvery === 0 || i === xEntries.length - 1;
+
+            if (showLabel) {
+                ctx.fillStyle = "#7f8796";
+                ctx.font = "10px Inter, system-ui, sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText(formatDate(entry.date), xx, height-bottom+18);
+                ctx.fillText(`#${entry.stopnum}`, xx, height-bottom+32);
+            }
+        }
+    } else {
+        for (let i = 0; i < xEntries.length; i++) {
+            const xx = x(i);
+
+            ctx.strokeStyle = "#222832";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(xx,top);
+            ctx.lineTo(xx,height-bottom);
+            ctx.stroke();
+
+            ctx.fillStyle = "#7f8796";
+            ctx.font = "10px Inter, system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(`#${xEntries[i]}`,xx,height-bottom+20);
+        }
     }
 
-    // Event series.
+    // ---------------------------------------------
+    // EVENT SERIES
+    // ---------------------------------------------
+
     for (const s of series) {
         ctx.strokeStyle = s.color;
         ctx.fillStyle = s.color;
@@ -404,41 +510,56 @@ function drawChart() {
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
 
-        // Connect points belonging to this event only.
         ctx.beginPath();
 
-        s.rows.forEach((row,i) => {
-            const xx = x(indexByStop.get(row.stopnum), stopNumbers.length);
-            const yy = y(row.stoptime);
+        let first = true;
 
-            if (i === 0) ctx.moveTo(xx,yy);
-            else ctx.lineTo(xx,yy);
-        });
+        for (const row of s.rows) {
+            const key = xKey(row);
+            const index = indexByX.get(key);
+            if (index === undefined) continue;
+
+            const xx = x(index);
+            const yy = y(row.total);
+
+            if (first) {
+                ctx.moveTo(xx,yy);
+                first = false;
+            } else {
+                ctx.lineTo(xx,yy);
+            }
+        }
 
         ctx.stroke();
 
-        // Dots.
+        // Dots on every stop.
         for (const row of s.rows) {
-            const xx = x(indexByStop.get(row.stopnum), stopNumbers.length);
-            const yy = y(row.stoptime);
+            const index = indexByX.get(xKey(row));
+            if (index === undefined) continue;
 
+            const xx = x(index);
+            const yy = y(row.total);
+
+            ctx.fillStyle = s.color;
             ctx.beginPath();
             ctx.arc(xx,yy,5,0,Math.PI*2);
             ctx.fill();
 
+            ctx.fillStyle = "#171a21";
             ctx.beginPath();
             ctx.arc(xx,yy,2,0,Math.PI*2);
-            ctx.fillStyle = "#171a21";
             ctx.fill();
-
-            ctx.fillStyle = s.color;
         }
     }
 
     ctx.fillStyle = "#9aa1b0";
     ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Stop Number", left + plotW/2, height-10);
+    ctx.fillText(
+        chronological ? "Chronological Stop Sequence" : "Stop Number",
+        left + plotW/2,
+        height-10
+    );
 
     ctx.save();
     ctx.translate(15, top + plotH/2);
@@ -447,7 +568,7 @@ function drawChart() {
     ctx.restore();
 
     $("chartSubtitle").textContent =
-        `${selectedMember} · ${series.reduce((n,s) => n+s.rows.length,0)} stops`;
+        `${selectedMember} · ${series.reduce((n,s) => n+s.rows.length,0)} stops · ${chronological ? "Chronological" : "Overlay"}`;
 }
 
 function renderLegend() {
@@ -473,6 +594,32 @@ function renderChart() {
     drawChart();
     renderLegend();
 }
+
+$("mappingToggle").onclick = () => {
+    mappingMode = mappingMode === "overlay" ? "chronological" : "overlay";
+    const chronological = mappingMode === "chronological";
+    $("mappingMode").textContent = chronological ? "Chronological" : "Overlay";
+    $("mappingToggle").setAttribute("aria-pressed", chronological ? "true" : "false");
+    renderChart();
+};
+
+$("maxYInput").addEventListener("input", () => {
+    const value = Number($("maxYInput").value);
+    if (Number.isFinite(value) && value > 0) {
+        maxYSetting = value;
+        renderChart();
+    }
+});
+
+$("maxYInput").addEventListener("change", () => {
+    const value = Number($("maxYInput").value);
+    if (!Number.isFinite(value) || value <= 0) {
+        $("maxYInput").value = maxYSetting;
+        return;
+    }
+    maxYSetting = value;
+    renderChart();
+});
 
 $("memberSelect").onchange = () => {
     selectedMember = $("memberSelect").value;
