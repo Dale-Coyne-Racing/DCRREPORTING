@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="logo.png" type="image/png">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DCR Pit Stop Analysis</title>
@@ -1193,7 +1194,7 @@ function updateCarImage(stop) {
         return;
     }
 
-    image.onload = () => { image.style.display = "block element-to-hide"; fallback.style.display = "none"; };
+    image.onload = () => { image.style.display = "block"; fallback.style.display = "none"; };
     image.onerror = () => { image.style.display = "none"; fallback.style.display = "flex"; fallback.textContent = `Could not load ${imagePath}`; };
     image.src = imagePath;
     image.alt = `Dale Coyne Racing car ${carNumber}`;
