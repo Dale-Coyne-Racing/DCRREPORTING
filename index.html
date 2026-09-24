@@ -16,13 +16,83 @@
 <section class="hero"><div class="eyebrow">Dashboard</div><h1>What would you like to look at?</h1><p>Access pit-stop analysis, recent activity, and the overall reporting view from one place.</p></section>
 <div class="section-label">Reports</div>
 <nav class="nav-grid" aria-label="Report navigation">
-<a class="nav-card accent" href="analysis.html"><div class="card-top"><span class="card-number">01 / ANALYSIS</span><span class="card-arrow">→</span></div><div><div class="card-title">Pit Stop Analysis</div><div class="card-description">Inspect individual pit stops, position performance, stage timing, and the selected-stop timeline.</div></div></a>
-<a class="nav-card" href="recent.html"><div class="card-top"><span class="card-number">02 / RECENT</span><span class="card-arrow">→</span></div><div><div class="card-title">Recent Stops</div><div class="card-description">Review the latest pit-stop activity and quickly move into the stops you want to investigate.</div></div></a>
-<a class="nav-card" href="overview.html"><div class="card-top"><span class="card-number">03 / OVERVIEW</span><span class="card-arrow">→</span></div><div><div class="card-title">Overview</div><div class="card-description">Get the broader picture with high-level reporting and summary information.</div></div></a>
+    <a class="nav-card accent" href="analysis.html">
+        <div class="card-top">
+            <span class="card-number">01 / ANALYSIS</span>
+            <span class="card-arrow">→</span>
+        </div>
+        <div>
+            <div class="card-title">Pit Stop Analysis</div>
+            <div class="card-description">Inspect individual pit stops, position performance, stage timing, and the selected-stop timeline.</div>
+        </div>
+    </a>
+    <a class="nav-card" href="#" id="mostRecentCard">
+        <div class="card-top">
+            <span class="card-number">02 / LATEST</span>
+            <span class="card-arrow">→</span>
+        </div>
+        <div>
+            <div class="card-title">Recent Stops</div>
+            <div class="card-description">
+                Jump directly to the most recent pit stop in the dataset.
+            </div>
+        </div>
+    </a>
+    <a class="nav-card" href="overview.html">
+        <div class="card-top">
+            <span class="card-number">03 / OVERVIEW</span>
+            <span class="card-arrow">→</span>
+        </div>
+        <div>
+            <div class="card-title">Overview</div>
+            <div class="card-description">Get the broader picture with high-level reporting and summary information.</div>
+        </div>
+    </a>
 </nav>
 <section class="quick-info"><div class="info-panel"><div class="info-title">Analysis</div><div class="info-text">Detailed stop-level information and the cumulative timing breakdown for each pit position.</div></div><div class="info-panel"><div class="info-title">Navigation</div><div class="info-text">Use this page as the central entry point. Each report remains a separate HTML page and can be linked directly.</div></div></section>
 </main>
 <footer><span>DCR REPORTING</span><span>© 2026</span></footer>
 </div>
+<script>
+    document.getElementById("mostRecentCard").addEventListener("click", async (event) => {
+        event.preventDefault();
+
+        try {
+            const response = await fetch("https://crisp-publicly-mosquito.ngrok-free.app/api/pitstops", {
+                headers: {
+                    "ngrok-skip-browser-warning": "true"
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to load pit stops");
+            }
+
+            const data = await response.json();
+
+            if (!data.length) {
+                return;
+            }
+
+            const mostRecent = [...data].sort((a, b) => {
+                if (String(a.stopdate) !== String(b.stopdate)) {
+                    return String(b.stopdate).localeCompare(String(a.stopdate));
+                }
+
+                return Number(b.stopnum) - Number(a.stopnum);
+            })[0];
+
+            const params = new URLSearchParams({
+                stopdate: String(mostRecent.stopdate),
+                stopnum: String(mostRecent.stopnum)
+            });
+
+            window.location.href = `analysis.html?${params.toString()}`;
+
+        } catch (error) {
+            console.error("Could not find most recent stop:", error);
+        }
+    });
+</script>
 </body>
 </html>

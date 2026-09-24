@@ -57,6 +57,27 @@ canvas{display:block;width:100%;height:500px}
 .empty{padding:15px;border:1px dashed var(--border);border-radius:8px;color:var(--muted);font-size:12px}
 .back{display:inline-block;margin-top:24px;color:var(--muted);font-size:11px;text-decoration:none}
 .back:hover{color:var(--accent)}
+
+.chart-tooltip {
+    position: fixed;
+    display: none;
+    pointer-events: none;
+    z-index: 1000;
+
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+
+    background: var(--panel2);
+    color: var(--text);
+
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+
+    box-shadow: var(--shadow);
+}
+
 @media(max-width:900px){body{padding:16px}.dashboard{grid-template-columns:1fr}.controls{position:static}.event-list{max-height:240px}}
 </style>
 </head>
@@ -104,8 +125,10 @@ canvas{display:block;width:100%;height:500px}
     <div class="control-section">
       <div class="control-heading">Events</div>
       <div class="button-row">
-        <button id="selectAll" class="small-btn">Select All</button>
-        <button id="selectNone" class="small-btn">Select None</button>
+        <button id="selectAll" class="small-btn">All</button>
+        <button id="selectNone" class="small-btn">None</button>
+        <button id="selectRaces" class="small-btn">Races</button>
+        <button id="selectPractice" class="small-btn">Practice</button>
       </div>
       <div id="eventList" class="event-list"></div>
       <div class="stat"><span>Events selected</span><strong id="eventCount">0</strong></div>
@@ -120,7 +143,9 @@ canvas{display:block;width:100%;height:500px}
     <div id="chartSubtitle" class="panel-title">Select a member</div>
   </div>
   <div class="chart-wrap">
+    
     <canvas id="chart" aria-label="Pit stop time line chart"></canvas>
+    <div id="chartTooltip" class="chart-tooltip"></div>
   </div>
   <div id="legend" class="legend"></div>
   <div class="note">
@@ -149,6 +174,7 @@ let selectedEvents = new Set();
 let selectedMember = "";
 let mappingMode = "overlay";
 let maxYSetting = DEFAULT_MAX_Y;
+let chartHitTargets = [];
 
 const $ = id => document.getElementById(id);
 
@@ -292,9 +318,12 @@ function hexToRgb(hex) {
 }
 
 function drawChart() {
+    
     const canvas = $("chart");
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+
+    chartHitTargets = [];
 
     const width = Math.max(600, rect.width);
     const height = 500;
@@ -549,6 +578,13 @@ function drawChart() {
             ctx.beginPath();
             ctx.arc(xx,yy,2,0,Math.PI*2);
             ctx.fill();
+
+            chartHitTargets.push({
+                x: xx,
+                y: yy,
+                row,
+                event: s.event
+            });
         }
     }
 
@@ -621,6 +657,99 @@ $("maxYInput").addEventListener("change", () => {
     renderChart();
 });
 
+$("chart").addEventListener("click", (event) => {
+    const canvas = $("chart");
+    const rect = canvas.getBoundingClientRect();
+
+    const scaleX =
+        canvas.width / (window.devicePixelRatio || 1) / rect.width;
+
+    const scaleY =
+        canvas.height / (window.devicePixelRatio || 1) / rect.height;
+
+    const clickX =
+        (event.clientX - rect.left) * scaleX;
+
+    const clickY =
+        (event.clientY - rect.top) * scaleY;
+
+    let nearest = null;
+    let nearestDistance = Infinity;
+
+    for (const target of chartHitTargets) {
+        const dx = clickX - target.x;
+        const dy = clickY - target.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = target;
+        }
+    }
+
+    if (!nearest || nearestDistance > 12) return;
+
+    const params = new URLSearchParams({
+        stopdate: nearest.row.stopdate,
+        stopnum: String(nearest.row.stopnum)
+    });
+
+    window.location.href = `analysis.html?${params.toString()}`;
+});
+
+$("chart").addEventListener("mousemove", (event) => {
+    const canvas = $("chart");
+    const rect = canvas.getBoundingClientRect();
+
+    const scaleX =
+        canvas.width / (window.devicePixelRatio || 1) / rect.width;
+
+    const scaleY =
+        canvas.height / (window.devicePixelRatio || 1) / rect.height;
+
+    const mouseX =
+        (event.clientX - rect.left) * scaleX;
+
+    const mouseY =
+        (event.clientY - rect.top) * scaleY;
+
+    let nearest = null;
+    let nearestDistance = Infinity;
+
+    // Find the closest plotted dot to the mouse.
+    for (const target of chartHitTargets) {
+        const dx = mouseX - target.x;
+        const dy = mouseY - target.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = target;
+        }
+    }
+
+    const tooltip = $("chartTooltip");
+
+    // Only show the tooltip when we're close enough to a dot.
+    if (!nearest || nearestDistance > 12) {
+        tooltip.style.display = "none";
+        return;
+    }
+
+    tooltip.textContent = `${nearest.row.total.toFixed(3)}s`;
+
+    tooltip.style.left = `${event.clientX + 12}px`;
+    tooltip.style.top = `${event.clientY + 12}px`;
+
+    tooltip.style.display = "block";
+});
+
+$("chart").addEventListener("mouseleave", () => {
+    $("chartTooltip").style.display = "none";
+});
+
+$("chart").style.cursor = "pointer";
+
 $("memberSelect").onchange = () => {
     selectedMember = $("memberSelect").value;
     renderChart();
@@ -628,6 +757,18 @@ $("memberSelect").onchange = () => {
 
 $("selectAll").onclick = () => {
     selectedEvents = new Set(events.map(e => e.key));
+    renderEvents();
+    renderChart();
+};
+
+$("selectRaces").onclick = () => {
+    selectedEvents = new Set(events.filter(e => e.context != "PRACTICE").map(e => e.key));
+    renderEvents();
+    renderChart();
+};
+
+$("selectPractice").onclick = () => {
+    selectedEvents = new Set(events.filter(e => e.context === "PRACTICE").map(e => e.key));
     renderEvents();
     renderChart();
 };

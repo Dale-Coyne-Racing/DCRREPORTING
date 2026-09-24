@@ -104,12 +104,13 @@ button {
     margin-bottom: 9px;
 }
 
-.date-list, .stop-list {
+.stop-list {
     display: grid;
-    gap: 5px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 }
 
-.date-btn, .stop-btn {
+.date-btn {
     width: 100%;
     border: 1px solid transparent;
     border-radius: 8px;
@@ -118,6 +119,28 @@ button {
     padding: 10px 11px;
     text-align: left;
     transition: .15s ease;
+}
+
+.stop-btn {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 9px;
+    text-align: left;
+    transition: .15s ease;
+}
+
+.stop-btn:hover {
+    border-color: #414957;
+    background: var(--panel-3);
+}
+
+.stop-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
 }
 
 .date-btn:hover, .stop-btn:hover {
@@ -142,13 +165,48 @@ button {
 }
 
 .stop-btn {
+    display: block;
+    justify-content: space-between;
+    align-items: center;
+}
+.stop-btn-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
 .stop-number {
-    font-weight: 750;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+}
+
+.stop-cars {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.stop-car {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 27px;
+    height: 24px;
+    padding: 0 6px;
+    border-radius: 5px;
+    background: var(--panel-3);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.stop-total {
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: 10px;
 }
 
 .stop-total {
@@ -638,6 +696,35 @@ h1 {
     .wheel.w3, .wheel.w4 { bottom: 27px; }
 
 }
+
+.event-select {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 10px 11px;
+    outline: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.event-select:hover {
+    border-color: #414957;
+}
+
+.event-select:focus {
+    border-color: var(--accent);
+}
+
+.car-column-header{
+    font-size: 24px;
+    font-weight: 800;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+    text-align:center;
+}
+
+
 </style>
 </head>
 
@@ -654,12 +741,14 @@ h1 {
         </div>
 
         <div class="side-section">
-            <div class="side-heading">Session / Date</div>
-            <div id="dateList" class="date-list"></div>
+            <div class="side-heading">Event</div>
+
+            <select id="eventSelect" class="event-select"></select>
         </div>
 
         <div class="side-section">
             <div class="side-heading">Pit Stops</div>
+
             <div id="stopList" class="stop-list"></div>
         </div>
     </aside>
@@ -756,6 +845,11 @@ h1 {
  */
 const API_URL = "https://crisp-publicly-mosquito.ngrok-free.app";
 
+const params = new URLSearchParams(window.location.search);
+const requestedDate = params.get("stopdate");
+const requestedStopNum = Number(params.get("stopnum"));
+
+
 const POSITIONS = {
     OF: { label: "Outside Front", color: "#ff6b00" },
     IF: { label: "Inside Front",  color: "#62a8ff" },
@@ -848,51 +942,84 @@ function groupData() {
     }
 
     groupedStops = [...map.values()].sort((a, b) => {
-        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        if (a.date !== b.date) {
+            return a.date.localeCompare(b.date);
+        }
+
         return a.stopnum - b.stopnum;
     });
+
+    // If analysis.html was opened from overview.html,
+    // try to select the exact requested stop.
+    const requestedStop = groupedStops.find(stop =>
+        stop.date === requestedDate &&
+        stop.stopnum === requestedStopNum
+    );
+
+    if (requestedStop) {
+        selectedDate = requestedStop.date;
+        selectedStopKey = requestedStop.key;
+    } else {
+        // Normal behavior when no valid stop was requested.
+        const dates = getDates();
+
+        selectedDate = dates[0] ?? null;
+        selectedStopKey =
+            stopsForDate(selectedDate)[0]?.key ?? null;
+    }
 }
 
 function getDates() {
     return [...new Set(groupedStops.map(x => x.date))].sort();
 }
 
+function getEvents() {
+    return getDates().map(date => ({
+        date,
+        context: stopsForDate(date)[0]?.context || "Session"
+    }));
+}
+
 function stopsForDate(date) {
     return groupedStops.filter(x => x.date === date);
 }
 
-function renderDates() {
-    const container = $("dateList");
-    container.innerHTML = "";
+function renderEventSelect() {
+    const select = $("eventSelect");
 
-    const dates = getDates();
+    if (!select) return;
 
-    if (!dates.length) {
-        container.innerHTML = `<div class="empty">No dates found.</div>`;
+    select.innerHTML = "";
+
+    const events = getEvents();
+
+    if (!events.length) {
+        select.innerHTML = `<option value="">No events found</option>`;
         return;
     }
 
-    for (const date of dates) {
-        const stops = stopsForDate(date);
+    for (const event of events) {
+        const option = document.createElement("option");
 
-        const button = document.createElement("button");
-        button.className = `date-btn ${date === selectedDate ? "active" : ""}`;
-        button.innerHTML = `
-            <div class="date-main">${formatDate(date)}</div>
-            <div class="date-sub">${stops.length} stop${stops.length === 1 ? "" : "s"}</div>
-        `;
+        option.value = event.date;
+        option.textContent =
+            `${event.context} · ${formatDate(event.date)}`;
 
-        button.onclick = () => {
-            selectedDate = date;
-            const first = stopsForDate(date)[0];
-            selectedStopKey = first?.key ?? null;
-            render();
-        };
+        option.selected = event.date === selectedDate;
 
-        container.appendChild(button);
+        select.appendChild(option);
     }
-}
 
+    select.onchange = () => {
+        selectedDate = select.value;
+
+        const stops = stopsForDate(selectedDate);
+
+        selectedStopKey = stops[0]?.key ?? null;
+
+        render();
+    };
+}
 function renderStops() {
     const container = $("stopList");
     container.innerHTML = "";
@@ -900,30 +1027,88 @@ function renderStops() {
     const stops = stopsForDate(selectedDate);
 
     if (!stops.length) {
-        container.innerHTML = `<div class="empty">No stops for this date.</div>`;
+        container.innerHTML =
+            `<div class="empty">No stops for this event.</div>`;
         return;
     }
 
+    // Group the stops by car.
+    const stopsByCar = new Map();
+
     for (const stop of stops) {
-        const button = document.createElement("button");
-        button.className = `stop-btn ${stop.key === selectedStopKey ? "active" : ""}`;
 
-        const stopTime = stop.rows[0]?.stoptime ?? 0;
+        const cars = [...new Set(
+            stop.rows
+                .map(row => Number(row.car))
+                .filter(car => Number.isFinite(car))
+        )];
 
-        button.innerHTML = `
-            <span>
-                <span class="stop-number">Stop ${stop.stopnum}</span>
-                <span class="stop-sub">${stop.context || "—"}</span>
-            </span>
-            <span class="stop-total">${formatSeconds(stopTime)}</span>
-        `;
+        for (const car of cars) {
 
-        button.onclick = () => {
-            selectedStopKey = stop.key;
-            render();
-        };
+            if (!stopsByCar.has(car)) {
+                stopsByCar.set(car, []);
+            }
 
-        container.appendChild(button);
+            stopsByCar.get(car).push(stop);
+        }
+    }
+
+    // Cars become the columns.
+    const cars = [...stopsByCar.keys()]
+        .sort((a, b) => a - b);
+
+    for (const car of cars) {
+
+        const column = document.createElement("div");
+        column.className = "car-stop-column";
+
+        const header = document.createElement("div");
+        header.className = "car-column-header";
+        header.textContent = `Car ${car}`;
+
+        column.appendChild(header);
+
+        const carStops = stopsByCar.get(car);
+
+        // Keep stops in their original numerical order.
+        carStops.sort((a, b) => a.stopnum - b.stopnum);
+
+        var i = 1;
+        for (const stop of carStops) {
+
+            const carRows = stop.rows.filter(
+                row => Number(row.car) === car
+            );
+
+            const button = document.createElement("button");
+
+            button.className =
+                `stop-btn ${stop.key === selectedStopKey ? "active" : ""}`;
+
+            const stopTime =
+                carRows[0]?.stoptime ?? 0;
+
+            button.innerHTML = `
+                <div class="stop-number">
+                    Stop ${i}
+                </div>
+
+                <div class="stop-total">
+                    ${formatSeconds(stopTime)}
+                </div>
+            `;
+
+            button.onclick = () => {
+                selectedStopKey = stop.key;
+                render();
+            };
+
+            column.appendChild(button);
+
+            i++;
+        }
+
+        container.appendChild(column);
     }
 }
 
@@ -1124,7 +1309,7 @@ function renderStageTimeline() {
     );
 
     // Always show 2 seconds before zero.
-    const minValue = -2;
+    const minValue = -0.75;
 
     let maxValue = 0;
 
@@ -1270,7 +1455,7 @@ function renderStageTimeline() {
 
         let cumulative = Number(stages[0]);
 
-        if (!Number.isFinite(cumulative) || cumulative < 0) {
+        if (!Number.isFinite(cumulative) || cumulative < -1) {
             cumulative = 0;
         }
 
@@ -1365,7 +1550,7 @@ function svgEl(tag, attrs = {}, text = "") {
 
 
 function render() {
-    renderDates();
+    renderEventSelect();
     renderStops();
     renderStop();
     renderStageTimeline();
@@ -1403,10 +1588,6 @@ async function loadData() {
 
         allRows = data.map(normalizeRow);
         groupData();
-
-        const dates = getDates();
-        selectedDate = dates[0] ?? null;
-        selectedStopKey = stopsForDate(selectedDate)[0]?.key ?? null;
 
         $("statusText").textContent = `${allRows.length} records loaded`;
         $("statusDot").style.background = "var(--green)";
