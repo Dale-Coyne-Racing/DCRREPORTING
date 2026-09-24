@@ -95,6 +95,13 @@ button {
     margin-top: 25px;
 }
 
+@media (max-width: 700px) {
+    .stop-list {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+}
+
 .side-heading {
     color: var(--muted);
     font-size: 10px;
@@ -534,6 +541,12 @@ h1 {
     color: var(--muted);
     cursor: default;
     transform: none;
+}
+
+@media (max-width: 600px) {
+    .element-to-hide {
+        display: none;
+    }
 }
 
 .analytics {
@@ -1174,13 +1187,13 @@ function updateCarImage(stop) {
 
     if (!imagePath) {
         image.removeAttribute("src");
-        image.style.display = "none";
+        image.style.display = "none ";
         fallback.style.display = "flex";
         fallback.textContent = carNumber ? `No image for car ${carNumber}` : "No car number";
         return;
     }
 
-    image.onload = () => { image.style.display = "block"; fallback.style.display = "none"; };
+    image.onload = () => { image.style.display = "block element-to-hide"; fallback.style.display = "none"; };
     image.onerror = () => { image.style.display = "none"; fallback.style.display = "flex"; fallback.textContent = `Could not load ${imagePath}`; };
     image.src = imagePath;
     image.alt = `Dale Coyne Racing car ${carNumber}`;
@@ -1206,7 +1219,7 @@ function renderStop() {
                 ${rows.has("OR") ? positionCard(rows.get("OR")) : missingPositionCard("OR")}
             </div>
 
-            <div class="car-card">
+            <div class="car-card element-to-hide">
                 <img id="carImage" class="car-image" src="" alt="Selected car">
                 <div id="carImageFallback" class="car-image-fallback">No car image</div>
                 <div class="car-label">Car ${getCarNumber(stop) ?? "—"}<br>Stop #${stop.stopnum}</div>
